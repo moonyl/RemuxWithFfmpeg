@@ -28,8 +28,37 @@
  * @example remuxing.c
  */
 
+extern "C" {
 #include <libavutil/timestamp.h>
 #include <libavformat/avformat.h>
+}
+
+class TsToStr
+{
+    char buf[AV_TS_MAX_STRING_SIZE] = {0,};
+public:
+    virtual char const* operator()(int64_t ts) {
+        return av_ts_make_string(buf, ts);
+    }
+};
+
+class TsToTimeStr
+{
+    char buf[AV_TS_MAX_STRING_SIZE] = {0,};
+public:
+    virtual char const* operator()(int64_t ts, AVRational *tb) {
+        return av_ts_make_time_string(buf, ts, tb);
+    }
+};
+
+class ErrToStr
+{
+    char buf[AV_ERROR_MAX_STRING_SIZE] = {0, };
+public:
+    virtual char const* operator()(int errnum) {
+        return av_make_error_string(buf, AV_ERROR_MAX_STRING_SIZE, errnum);
+    }
+};
 
 static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt, const char *tag)
 {
@@ -37,9 +66,12 @@ static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt, cons
 
     printf("%s: pts:%s pts_time:%s dts:%s dts_time:%s duration:%s duration_time:%s stream_index:%d\n",
            tag,
-           av_ts2str(pkt->pts), av_ts2timestr(pkt->pts, time_base),
-           av_ts2str(pkt->dts), av_ts2timestr(pkt->dts, time_base),
-           av_ts2str(pkt->duration), av_ts2timestr(pkt->duration, time_base),
+           TsToStr()(pkt->pts),
+           TsToTimeStr()(pkt->pts, time_base),
+           TsToStr()(pkt->dts),
+           TsToTimeStr()(pkt->dts, time_base),
+           TsToStr()(pkt->duration),
+           TsToTimeStr()(pkt->duration, time_base),
            pkt->stream_index);
 }
 
@@ -85,7 +117,7 @@ int main(int argc, char **argv)
     }
 
     stream_mapping_size = ifmt_ctx->nb_streams;
-    stream_mapping = av_mallocz_array(stream_mapping_size, sizeof(*stream_mapping));
+    stream_mapping = static_cast<int*>(av_mallocz_array(stream_mapping_size, sizeof(*stream_mapping)));
     if (!stream_mapping) {
         ret = AVERROR(ENOMEM);
         goto end;
@@ -156,8 +188,8 @@ int main(int argc, char **argv)
         log_packet(ifmt_ctx, &pkt, "in");
 
         /* copy packet */
-        pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
-        pkt.dts = av_rescale_q_rnd(pkt.dts, in_stream->time_base, out_stream->time_base, AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX);
+        pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, static_cast<AVRounding>(AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX));
+        pkt.dts = av_rescale_q_rnd(pkt.dts, in_stream->time_base, out_stream->time_base, static_cast<AVRounding>(AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX));
         pkt.duration = av_rescale_q(pkt.duration, in_stream->time_base, out_stream->time_base);
         pkt.pos = -1;
         log_packet(ofmt_ctx, &pkt, "out");
@@ -171,7 +203,7 @@ int main(int argc, char **argv)
     }
 
     av_write_trailer(ofmt_ctx);
-end:
+    end:
 
     avformat_close_input(&ifmt_ctx);
 
@@ -183,7 +215,7 @@ end:
     av_freep(&stream_mapping);
 
     if (ret < 0 && ret != AVERROR_EOF) {
-        fprintf(stderr, "Error occurred: %s\n", av_err2str(ret));
+        fprintf(stderr, "Error occurred: %s\n", ErrToStr()(ret));
         return 1;
     }
 
