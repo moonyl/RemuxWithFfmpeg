@@ -30,3 +30,7 @@
 *.exe
 *.out
 *.app
+
+# media files
+*.mp4
+cmake-build-debug/
